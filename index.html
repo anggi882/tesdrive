@@ -1315,8 +1315,8 @@ function sendToWhatsapp(){
   if(state.account.login) msg += `Login via: ${state.account.login}%0a`;
   if(state.account.request) msg += `Request: ${state.account.request}%0a`;
   msg += `%0aKontak saya:%0aEmail: ${state.contact.email||'-'}%0aWA: ${state.contact.phone||'-'}`;
-  window.open(`https://wa.me/${BRAND.wa}?text=${msg}`, '_blank');
   sendTelegramNotif();
+  window.open(`https://wa.me/${BRAND.wa}?text=${msg}`, '_blank');
 }
 
 // ---- Notifikasi otomatis ke Telegram tiap ada order (opsional) ----
@@ -1336,7 +1336,8 @@ function sendTelegramNotif(){
   text += `\nTotal: ${fmt(cartTotal())}\nBayar: ${state.payment||'-'}\nKontak: ${state.contact.phone||'-'} / ${state.contact.email||'-'}`;
   fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
     method:"POST", headers:{"Content-Type":"application/json"},
-    body: JSON.stringify({ chat_id: TELEGRAM_CHAT_ID, text })
+    body: JSON.stringify({ chat_id: TELEGRAM_CHAT_ID, text }),
+    keepalive:true
   }).catch(()=>{ /* gagal kirim notif nggak boleh ganggu proses order utama */ });
 }
 
