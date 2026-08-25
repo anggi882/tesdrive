@@ -299,10 +299,19 @@
   ::-webkit-scrollbar{display:none;}
 
   /* ---------- Gate (login) ---------- */
-  .gate-wrap{min-height:100vh;display:flex;flex-direction:column;justify-content:center;padding:26px;text-align:center;}
-  .gate-wrap .logo-big{width:64px;height:64px;border-radius:18px;margin:0 auto 18px;background:linear-gradient(145deg,var(--accent),#c94f0f);display:flex;align-items:center;justify-content:center;font-size:30px;box-shadow:0 10px 26px -6px rgba(255,122,41,0.5);}
-  .gate-wrap h1{font-family:'Anton',sans-serif;font-size:26px;margin:0 0 6px;}
-  .gate-wrap p{font-size:12.5px;color:var(--text-dim);margin:0 0 26px;}
+  .gate-wrap{min-height:100vh;display:flex;flex-direction:column;justify-content:center;padding:26px;text-align:center;position:relative;overflow:hidden;}
+  .gate-wrap .gate-bg{position:absolute;inset:0;z-index:0;pointer-events:none;
+    background:
+      radial-gradient(ellipse 420px 260px at 20% 8%, rgba(52,217,196,0.14), transparent 60%),
+      radial-gradient(ellipse 380px 300px at 85% 92%, rgba(255,122,41,0.14), transparent 60%),
+      repeating-radial-gradient(circle at 50% 50%, rgba(255,255,255,0.025) 0, rgba(255,255,255,0.025) 1px, transparent 2px, transparent 30px);
+  }
+  .gate-wrap > *{position:relative;z-index:1;}
+  .gate-wrap .logo-big{width:72px;height:72px;border-radius:20px;margin:0 auto 20px;background:linear-gradient(145deg,var(--accent),#c94f0f);display:flex;align-items:center;justify-content:center;font-size:34px;box-shadow:0 12px 30px -6px rgba(255,122,41,0.55);}
+  .gate-wrap h1{font-family:'Anton',sans-serif;font-size:28px;margin:0 0 6px;letter-spacing:0.3px;}
+  .gate-wrap p{font-size:12.5px;color:var(--text-dim);margin:0 0 20px;max-width:320px;margin-left:auto;margin-right:auto;}
+  .gate-badges{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-bottom:26px;}
+  .gate-badge{font-size:10.5px;color:var(--text-dim);background:var(--bg-panel);border:1px solid var(--line);padding:6px 12px;border-radius:100px;display:flex;align-items:center;gap:5px;white-space:nowrap;}
   #gsi-btn-wrap{display:flex;justify-content:center;margin-bottom:14px;min-height:44px;}
   .fallback-note{font-size:10.5px;color:var(--text-dim);margin-bottom:10px;}
   .glogin-fallback{background:var(--bg-panel);border:1px solid var(--line);border-radius:14px;padding:16px;text-align:left;}
@@ -471,6 +480,46 @@ const firebaseConfig = {
 firebase.initializeApp(firebaseConfig);
 const db = firebase.firestore();
 const CONFIG_DOC = db.collection("config").doc("main");
+const ORDERS_COL = db.collection("orders");
+const CART_KEY = "fishitlanggz_cart_v1";
+function saveCartLocal(){
+  try{ localStorage.setItem(CART_KEY, JSON.stringify(state.cart)); }catch(e){}
+}
+function loadCartLocal(){
+  try{
+    const raw = localStorage.getItem(CART_KEY);
+    if(raw){ const arr = JSON.parse(raw); if(Array.isArray(arr)) state.cart = arr; }
+  }catch(e){}
+}
+function saveOrderToHistory(cartSnapshot, total){
+  const order = {
+    email: (state.user && state.user.email) ? state.user.email : (state.contact.email||''),
+    name: state.user ? state.user.name : (state.contact.email || 'Pembeli'),
+    items: cartSnapshot.map(c=>({ itemTitle:c.itemTitle, variantName:c.variantName, price:c.price, qty:c.qty })),
+    total: total,
+    payment: state.payment || '-',
+    accountInfo: state.account.email || '',
+    contactPhone: state.contact.phone || '',
+    createdAt: Date.now(),
+  };
+  ORDERS_COL.add(order).catch(e=>{ console.error("Gagal simpan riwayat order:", e); });
+}
+function loadOrderHistory(){
+  if(!state.user || !state.user.email){ state.orderHistory = []; state.orderHistoryLoading = false; render(); return; }
+  state.orderHistoryLoading = true;
+  ORDERS_COL.where('email','==',state.user.email).get().then(snap=>{
+    const list = [];
+    snap.forEach(doc=>list.push(doc.data()));
+    list.sort((a,b)=>b.createdAt - a.createdAt);
+    state.orderHistory = list;
+    state.orderHistoryLoading = false;
+    render();
+  }).catch(e=>{
+    console.error("Gagal load riwayat order:", e);
+    state.orderHistoryLoading = false;
+    render();
+  });
+}
 
 function autoSaveConfig(){
   const payload = { catalog: CATALOG_ITEMS, testimonials: state.testimonials, links: LINK_ITEMS, savedAt: Date.now() };
@@ -540,6 +589,8 @@ let state = {
   adminDraft: null,
   fallbackName: "", fallbackEmail: "",
   adminPassInput: "",
+  orderHistory: [],
+  orderHistoryLoading: false,
 };
 
 function fmt(n){ return "Rp " + n.toLocaleString("id-ID"); }
@@ -551,6 +602,7 @@ function findItem(id){
 function go(route, extra){
   state.route = route;
   if(extra) Object.assign(state, extra);
+  if(route === 'riwayat') loadOrderHistory();
   render();
   window.scrollTo(0,0);
 }
@@ -563,6 +615,7 @@ function drawerMenu(){
     {r:'home', ic:'🏠', label:'Beranda'},
     {r:'katalog', ic:'🗂️', label:'Katalog'},
     {r:'ringkasan', ic:'🧾', label:'Keranjang', badge:cartCount()>0?cartCount():null},
+    {r:'riwayat', ic:'📜', label:'Riwayat Pesanan'},
     {r:'testimoni', ic:'⭐', label:'Testimoni'},
     {r:'links', ic:'🔗', label:'Link & Grup'},
     {r:'kontak', ic:'💬', label:'Kontak Admin'},
@@ -903,9 +956,15 @@ function sendProofToWhatsapp(){
 function pageGate(){
   return `
   <div class="gate-wrap">
+    <div class="gate-bg"></div>
     <div class="logo-big">🎣</div>
     <h1>${BRAND.short}</h1>
-    <p>Masuk dulu buat lanjut ke katalog joki &amp; jualan item Fishit.</p>
+    <p>Masuk dulu buat lanjut ke katalog joki &amp; jualan item Fishit — aman &amp; cepat.</p>
+    <div class="gate-badges">
+      <span class="gate-badge">⚡ Proses Cepat</span>
+      <span class="gate-badge">🔒 Login Aman</span>
+      <span class="gate-badge">⭐ Testimoni Real</span>
+    </div>
     <div id="gsi-btn-wrap"></div>
     <div id="gate-fallback"></div>
   </div>
@@ -1305,6 +1364,36 @@ function pageKontak(){
   `;
 }
 
+function pageRiwayat(){
+  if(!state.user){
+    return `
+    ${topbar(true,'home','Beranda')}
+    ${depthRail()}
+    <div class="section" style="padding-top:6px;">
+      <div class="section-head"><div><h2>📜 Riwayat Pesanan</h2><div class="sub">Simpanan semua pesanan yang pernah kamu kirim.</div></div></div>
+      <div class="empty-hint">Login dulu buat lihat riwayat pesanan kamu.</div>
+    </div>
+    `;
+  }
+  const orders = state.orderHistory || [];
+  return `
+  ${topbar(true,'home','Beranda')}
+  ${depthRail()}
+  <div class="section" style="padding-top:6px;">
+    <div class="section-head"><div><h2>📜 Riwayat Pesanan</h2><div class="sub">Semua pesanan yang pernah kamu kirim — simpan buat jaga-jaga kalau mau komplain atau cek ulang.</div></div></div>
+    ${state.orderHistoryLoading ? `<div class="empty-hint">Memuat riwayat...</div>` :
+      orders.length===0 ? `<div class="empty-hint">Belum ada riwayat pesanan.</div>` :
+      orders.map(o=>`
+        <div class="summary-card">
+          <div class="head"><div class="icon">🧾</div><div><h4>${new Date(o.createdAt).toLocaleString('id-ID',{dateStyle:'medium',timeStyle:'short'})}</h4><p>Bayar: ${o.payment} • Total: ${fmt(o.total)}</p></div></div>
+          ${o.items.map(it=>`<div class="row"><span>${it.itemTitle} - ${it.variantName} x${it.qty}</span><b>${fmt(it.price*it.qty)}</b></div>`).join('')}
+        </div>
+      `).join('')
+    }
+  </div>
+  `;
+}
+
 function pageLinks(){
   return `
   ${topbar(true,'home','Beranda')}
@@ -1332,10 +1421,12 @@ function addToCart(){
   const v = item.variants[state.selectedVariantIdx];
   if(!v) return;
   state.cart.push({ itemTitle:item.title, variantName:v.name, price:v.price, qty:state.qty, icon:item.icon, group:item.group });
+  saveCartLocal();
   go('ringkasan');
 }
 function removeFromCart(i){
   state.cart.splice(i,1);
+  saveCartLocal();
   render();
 }
 function setPayment(p){ state.payment = p; render(); }
@@ -1354,6 +1445,7 @@ function sendToWhatsapp(){
   if(state.account.login) msg += `Login via: ${state.account.login}%0a`;
   if(state.account.request) msg += `Request: ${state.account.request}%0a`;
   msg += `%0aKontak saya:%0aEmail: ${state.contact.email||'-'}%0aWA: ${state.contact.phone||'-'}`;
+  saveOrderToHistory(state.cart, cartTotal());
   sendTelegramNotif();
   window.open(`https://wa.me/${BRAND.wa}?text=${msg}`, '_blank');
 }
@@ -1385,7 +1477,7 @@ function render(){
   const app = document.getElementById('app');
   const pages = {
     gate:pageGate, home:pageHome, katalog:pageKatalog, produk:pageProduk,
-    checkout:pageCheckout, ringkasan:pageRingkasan, kontak:pageKontak, testimoni:pageTestimoni, links:pageLinks,
+    checkout:pageCheckout, ringkasan:pageRingkasan, kontak:pageKontak, testimoni:pageTestimoni, links:pageLinks, riwayat:pageRiwayat,
     "admin-login":pageAdminLogin, admin:pageAdmin, "admin-edit":pageAdminEdit,
     "admin-testimoni":pageAdminTestimoni, "admin-testimoni-edit":pageAdminTestimoniEdit,
     "admin-links":pageAdminLinks, "admin-links-edit":pageAdminLinkEdit
@@ -1400,6 +1492,7 @@ function render(){
 }
 const savedUser = loadSession();
 if(savedUser){ state.user = savedUser; state.route = "home"; }
+loadCartLocal();
 autoLoadConfig().then(()=>{ render(); });
 </script>
 </body>
