@@ -7,6 +7,8 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Anton&family=Manrope:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <script src="https://accounts.google.com/gsi/client" async defer></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
 <style>
   :root{
     --bg:#070b10;
@@ -454,26 +456,63 @@ function logoutUser(){
   go('gate');
 }
 
-// ---- Auto-save katalog & testimoni ke browser (jaga-jaga kalau lupa Export) ----
-// Ini CUMA tersimpan di browser & device ini. Kalau ganti HP/laptop, hosting ulang,
-// atau browser di-clear, data ini ikut hilang — makanya tetap pakai tombol
-// ⬇ Export di Admin buat simpan file .json ke GitHub / Drive / dst sebagai backup asli.
+// ---- Simpan katalog & testimoni ke Firebase Firestore (sinkron ke SEMUA device) ----
+// localStorage tetap dipakai sebagai cache offline, tapi sumber utama datanya sekarang Firestore.
 const CONFIG_KEY = "fishitlanggz_config_v1";
+const firebaseConfig = {
+  apiKey: "AIzaSyDILf7R2KLqFnM3JOVi7up2UJ6de12ILkQ",
+  authDomain: "fishitlanggz-aa307.firebaseapp.com",
+  projectId: "fishitlanggz-aa307",
+  storageBucket: "fishitlanggz-aa307.firebasestorage.app",
+  messagingSenderId: "638159950436",
+  appId: "1:638159950436:web:7c6865c400a6ebfe988571",
+  measurementId: "G-X29XLWMEHY"
+};
+firebase.initializeApp(firebaseConfig);
+const db = firebase.firestore();
+const CONFIG_DOC = db.collection("config").doc("main");
+
 function autoSaveConfig(){
-  try{ localStorage.setItem(CONFIG_KEY, JSON.stringify({ catalog: CATALOG_ITEMS, testimonials: state.testimonials, links: LINK_ITEMS, savedAt: Date.now() })); }
-  catch(e){ /* storage penuh/diblokir, ya sudah, tetap ada tombol Export manual */ }
+  const payload = { catalog: CATALOG_ITEMS, testimonials: state.testimonials, links: LINK_ITEMS, savedAt: Date.now() };
+  try{ localStorage.setItem(CONFIG_KEY, JSON.stringify(payload)); }
+  catch(e){ /* storage penuh/diblokir, ya sudah */ }
+  CONFIG_DOC.set(payload).catch(e=>{ console.error("Gagal simpan ke Firestore:", e); });
 }
+
 function autoLoadConfig(){
+  // Cache lokal dulu biar tampilan gak kosong sebelum Firestore selesai load
   try{
     const raw = localStorage.getItem(CONFIG_KEY);
-    if(!raw) return;
-    const data = JSON.parse(raw);
-    if(data && Array.isArray(data.catalog) && data.catalog.length){
-      CATALOG_ITEMS = data.catalog;
-      state.testimonials = Array.isArray(data.testimonials) ? data.testimonials : [];
-      LINK_ITEMS = Array.isArray(data.links) ? data.links : LINK_ITEMS;
+    if(raw){
+      const data = JSON.parse(raw);
+      if(data && Array.isArray(data.catalog) && data.catalog.length){
+        CATALOG_ITEMS = data.catalog;
+        state.testimonials = Array.isArray(data.testimonials) ? data.testimonials : [];
+        LINK_ITEMS = Array.isArray(data.links) ? data.links : LINK_ITEMS;
+      }
     }
-  }catch(e){ /* biarin pakai data default kalau gagal baca */ }
+  }catch(e){ /* biarin pakai data default kalau gagal baca cache */ }
+
+  // Lalu dengerin perubahan real-time dari Firestore — begitu admin update di HP manapun,
+  // semua HP yang lagi buka web ini otomatis ke-update juga.
+  return new Promise(resolve=>{
+    let first = true;
+    CONFIG_DOC.onSnapshot(doc=>{
+      if(doc.exists){
+        const data = doc.data();
+        if(data && Array.isArray(data.catalog) && data.catalog.length){
+          CATALOG_ITEMS = data.catalog;
+          state.testimonials = Array.isArray(data.testimonials) ? data.testimonials : [];
+          LINK_ITEMS = Array.isArray(data.links) ? data.links : LINK_ITEMS;
+        }
+      }
+      if(first){ first = false; resolve(); }
+      else { render(); }
+    }, err=>{
+      console.error("Firestore listen error:", err);
+      if(first){ first = false; resolve(); }
+    });
+  });
 }
 
 const ADMIN_PASSWORD = "fishitlanggz123";
@@ -1361,8 +1400,7 @@ function render(){
 }
 const savedUser = loadSession();
 if(savedUser){ state.user = savedUser; state.route = "home"; }
-autoLoadConfig();
-render();
+autoLoadConfig().then(()=>{ render(); });
 </script>
 </body>
 </html>
